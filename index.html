@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1f26">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>PokéFarm</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;color:#eef2f5;min-height:100vh}
+#bg{position:fixed;inset:0;z-index:-2;background:linear-gradient(135deg,#7a838e,#3c444e 40%,#666f7a 70%,#2d333a);background-size:cover;background-position:center}
+#grid{position:fixed;inset:0;z-index:-1;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.07) 1px,transparent 1px);background-size:12px 12px}
+header{position:fixed;top:0;left:0;right:0;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px;background:rgba(22,27,34,.92);box-shadow:0 4px 14px rgba(0,0,0,.5);z-index:5}
+header h1{font-size:17px;margin:0}
+main{padding:72px 12px 28px;max-width:640px;margin:auto}
+.btn{background:linear-gradient(145deg,#2b3038,#474f5b);color:#eef2f5;border:none;border-radius:12px;padding:12px 14px;font:inherit;box-shadow:inset 2px 2px 5px rgba(0,0,0,.65),inset -1px -1px 3px rgba(255,255,255,.08),0 0 12px rgba(5,10,25,.7);cursor:pointer;text-align:left}
+.btn.plus{color:#fff;box-shadow:0 0 18px rgba(54,183,255,.75),inset 2px 2px 5px rgba(0,0,0,.5)}
+.btn.small{padding:6px 10px;font-size:13px}
+.burger{width:44px;height:44px;text-align:center;font-size:22px;padding:0}
+.card{background:rgba(20,26,34,.86);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 10px;font-size:15px}
+.card h4{margin:14px 0 8px;font-size:13px;color:#9aa6b2}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi span{display:block;font-size:12px;color:#9aa6b2}
+.kpi b{font-size:19px}
+.good{color:#55d6a2}.bad{color:#ff7777}.muted{color:#9aa6b2;font-size:13px}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#9aa6b2;margin-bottom:10px}
+input,select{background:#111820;color:#eef2f5;border:1px solid #3a4553;border-radius:8px;padding:9px;font:inherit;min-width:0}
+.chk{display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:14px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08);gap:8px;font-size:14px}
+.drawer{position:fixed;top:0;bottom:0;left:0;width:250px;background:#141a22;box-shadow:8px 0 24px rgba(0,0,0,.7);transform:translateX(-105%);transition:transform .2s;z-index:10;padding:68px 12px 12px;display:flex;flex-direction:column;gap:8px;overflow:auto}
+.drawer.open{transform:none}
+.veil{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:9}
+.veil.open{display:block}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="grid"></div>
+
+<header>
+  <button class="btn burger" onclick="toggleMenu()" aria-label="Menu">☰</button>
+  <h1 id="title">Accueil</h1>
+</header>
+
+<nav class="drawer" id="drawer"></nav>
+<div class="veil" id="veil" onclick="toggleMenu()"></div>
+
+<main id="view"></main>
+
+<script>
+const K='pokefarm2';
+const MODES={gym:'Gym full',ligue:'Gym + ligue',red:'Gym + Red'};
+const BOOSTS={rune:'Pièce rune',charme:"Charme d'argent 100 %"};
+const PAGES=[['home','Accueil'],['cal','Calendrier'],['rerun','Re-runs'],['baies','Baies'],['ditto','Ditto'],['achat','Achat-revente'],['dep','Dépenses'],['autres','Autres'],['prev','Dépenses prévues'],['res','Résumés'],['bil','Bilans'],['set','Réglages']];
+
+let page='home';
+let selDate=today();
+let db=load();
+
+/* ---------- Données ---------- */
+function defDb(){
+  return {
+    settings:{monthKey:'',startBalance:0,seedPrice:490000,stackPrice:68000,boxCost:290000,pokeballPrice:0,rerunHours:1,
+      rates:{gym:{rune:0,charme:0},ligue:{rune:0,charme:0},red:{rune:0,charme:0}},
+      boostCost:{rune:0,charme:0}},
+    days:{},planned:[],events:[],bg:''
+  };
+}
+function load(){
+  try{
+    const s=JSON.parse(localStorage.getItem(K));
+    if(s&&s.settings){
+      const d=defDb();
+      return Object.assign(d,s,{settings:Object.assign(d.settings,s.settings)});
+    }
+  }catch(e){}
+  return defDb();
+}
+function save(){
+  try{localStorage.setItem(K,JSON.stringify(db));}
+  catch(e){alert("Sauvegarde impossible : "+e.message);}
+}
+function ensureDay(s){ if(!db.days[s]) db.days[s]={}; return db.days[s]; }
+
+/* ---------- Dates ---------- */
+function iso(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function today(){return iso(new Date());}
+function parse(s){const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);}
+function addDays(s,n){const d=parse(s);d.setDate(d.getDate()+n);return iso(d);}
+function monthKey(s){return s.slice(0,7);}
+function monthStart(s){return s.slice(0,8)+'01';}
+function monthEnd(s){const d=parse(monthStart(s));d.setMonth(d.getMonth()+1);d.setDate(0);return iso(d);}
+function weekStart(s){const d=parse(s);d.setDate(d.getDate()-((d.getDay()+6)%7));return iso(d);}
+
+/* ---------- Calculs ---------- */
+function mult(s){
+  let m=1;
+  db.events.forEach(e=>{ if(s>=e.start && s<=e.end) m*=(+e.mult||1); });
+  return m;
+}
+function rerunVal(x,s){
+  if(!x.done) return {g:0,d:0};
+  const S=db.settings, h=+x.hours||0;
+  return {
+    g:(+S.rates[x.mode][x.boost]||0)*h*mult(s),
+    d:(+S.boostCost[x.boost]||0)*h
+  };
+}
+function dayCalc(s){
+  const r={g:0,d:0,b:0,has:false};
+  const day=db.days[s];
+  if(!day) return r;
+  const S=db.settings;
+  (day.rerun||[]).forEach(x=>{ r.has=true; const v=rerunVal(x,s); r.g+=v.g; r.d+=v.d; });
+  const b=day.baies;
+  if(b){ r.has=true; if(b.done){ r.d+=(+b.sets||0)*S.seedPrice; r.g+=(+b.soldStacks||0)*S.stackPrice; } }
+  const di=day.ditto;
+  if(di){ r.has=true; if(di.done){ r.d+=(+di.boxes||0)*S.boxCost+(+di.pokeballQty||0)*S.pokeballPrice; r.g+=(+di.soldBoxes||0)*(+di.soldPrice||0); } }
+  (day.achat||[]).forEach(a=>{ r.has=true; if(a.type==='vente') r.g+=+a.price; else r.d+=+a.price; });
+  (day.dep||[]).forEach(a=>{ r.has=true; r.d+=+a.amount; });
+  (day.autres||[]).forEach(a=>{ r.has=true; if(a.kind==='gain') r.g+=+a.amount; else r.d+=+a.amount; });
+  r.b=r.g-r.d;
+  return r;
+}
+function rangeSum(a,b){
+  const t={g:0,d:0,b:0,n:0};
+  for(let s=a;s<=b;s=addDays(s,1)){
+    const r=dayCalc(s);
+    t.g+=r.g; t.d+=r.d; if(r.has) t.n++;
+  }
+  t.b=t.g-t.d;
+  return t;
+}
+function monthRange(s){return rangeSum(monthStart(s),monthEnd(s));}
+function weekRange(s){const a=weekStart(s);return rangeSum(a,addDays(a,6));}
+function prevMonthDate(s){return addDays(monthStart(s),-1);}
+function prevWeekStart(s){return addDays(weekStart(s),-7);}
+
+/* ---------- Affichage ---------- */
+function money(n){return Math.round(n).toLocaleString('fr-FR')+' $';}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function opts(obj,sel){return Object.entries(obj).map(([k,v])=>`<option value="${k}"${k===sel?' selected':''}>${v}</option>`).join('');}
+function kpi(label,val,cls){return `<div class="kpi"><span>${label}</span><b class="${cls}">${money(val)}</b></div>`;}
+function kpis3(t){return `<div class="kpis">${kpi('Gains',t.g,'good')}${kpi('Bénéfice',t.b,t.b>=0?'good':'bad')}${kpi('Dépenses',t.d,'bad')}</div>`;}
+function dateBar(){return `<div class="card"><label class="fld">Jour concerné<input type="date" value="${selDate}" onchange="setDate(this.value)"></label></div>`;}
+function listCard(title,items){
+  const body=items.length? items.map(i=>`<div class="row"><span>${esc(i.text)}</span><span style="white-space:nowrap">${i.amt||''} ${i.del?`<button class="btn small" onclick="${i.del}">✕</button>`:''}</span></div>`).join('') : '<p class="muted">Rien pour l\'instant.</p>';
+  return `<div class="card"><h3>${title}</h3>${body}</div>`;
+}
+
+function render(){
+  document.getElementById('title').textContent=(PAGES.find(p=>p[0]===page)||[])[1]||'';
+  document.getElementById('view').innerHTML=VIEWS[page]();
+  document.getElementById('drawer').innerHTML=PAGES.map(p=>`<button class="btn${p[0]===page?' plus':''}" onclick="go('${p[0]}')">${p[1]}</button>`).join('');
+  applyBg();
+}
+function go(p){page=p;closeMenu();render();window.scrollTo(0,0);}
+function setDate(v){selDate=v;render();}
+function toggleMenu(){document.getElementById('drawer').classList.toggle('open');document.getElementById('veil').classList.toggle('open');}
+function closeMenu(){document.getElementById('drawer').classList.remove('open');document.getElementById('veil').classList.remove('open');}
+function applyBg(){
+  document.getElementById('bg').style.backgroundImage=db.bg?`url("${db.bg}")`:'';
+}
+
+/* ---------- Pages ---------- */
+const VIEWS={};
+
+VIEWS.home=()=>{
+  const t=dayCalc(today());
+  const m=monthRange(today());
+  const bal=db.settings.startBalance+m.g-m.d;
+  const planned=db.planned.reduce((a,p)=>a+(+p.amount||0),0);
+  let h='';
+  if(db.settings.monthKey!==monthKey(today())){
+    h+=`<div class="card"><h3>Nouveau mois</h3><p class="muted">Confirme les valeurs du mois (solde de départ, prix, gains par heure).</p><button class="btn plus" onclick="go('set')">Mettre à jour</button></div>`;
+  }
+  h+=`<div class="card"><h3>Aujourd'hui</h3>${kpis3(t)}</div>`;
+  h+=`<div class="card"><h3>Ce mois-ci</h3><div class="kpis">${kpi('Solde actuel',bal,bal>=0?'good':'bad')}${kpi('Solde estimé',bal-planned,(bal-planned)>=0?'good':'bad')}</div><p class="muted">Dépenses prévues : ${money(planned)}</p></div>`;
+  if(parse(today()).getDay()===1){
+    const pm=monthRange(prevMonthDate(today()));
+    h+=`<div class="card"><h3>Bilan du mois précédent</h3>${kpis3(pm)}</div>`;
+  }
+  h+=`<button class="btn plus" style="width:100%" onclick="go('rerun')">+ Ajouter une saisie</button>`;
+  return h;
+};
+
+VIEWS.cal=()=>{
+  const t=dayCalc(selDate);
+  const d=db.days[selDate]||{};
+  const lines=[];
+  (d.rerun||[]).forEach(x=>lines.push(`Re-run · ${MODES[x.mode]} · ${BOOSTS[x.boost]} · ${x.hours} h · ${x.done?'fait':'non fait'}`));
+  if(d.baies) lines.push(`Baies · ${d.baies.done?'fait':'non fait'} · ${d.baies.sets||0} set(s) · ${d.baies.soldStacks||0} stack(s) vendu(s)`);
+  if(d.ditto) lines.push(`Ditto · ${d.ditto.done?'fait':'non fait'} · ${d.ditto.boxes||0} box · ${d.ditto.soldBoxes||0} vendue(s)`);
+  (d.achat||[]).forEach(a=>lines.push(`${a.type==='vente'?'Vente':'Achat'} · ${a.item} · ${money(a.price)}`));
+  (d.dep||[]).forEach(a=>lines.push(`Dépense · ${a.name} · ${money(a.amount)}`));
+  (d.autres||[]).forEach(a=>lines.push(`${a.kind==='gain'?'Gain':'Dépense'} divers · ${a.name} · ${money(a.amount)}`));
+  return dateBar()+`<div class="card"><h3>Totaux du jour</h3>${kpis3(t)}</div>`+
+    `<div class="card"><h3>Saisies</h3>${lines.length?lines.map(l=>`<div class="row">${esc(l)}</div>`).join(''):'<p class="muted">Aucune saisie ce jour.</p>'}</div>`;
+};
+
+VIEWS.rerun=()=>{
+  const d=db.days[selDate]||{};
+  const list=(d.rerun||[]).map((x,i)=>{const v=rerunVal(x,selDate);return {text:`${MODES[x.mode]} · ${BOOSTS[x.boost]} · ${x.hours} h · ${x.done?'fait':'non fait'}`,amt:money(v.g-v.d),del:`delRerun(${i})`};});
+  return dateBar()+`<div class="card"><h3>Nouveau re-run</h3>
+    <label class="fld">Mode<select id="rm">${opts(MODES,'gym')}</select></label>
+    <label class="fld">Boost<select id="rb">${opts(BOOSTS,'rune')}</select></label>
+    <label class="fld">Heures<input id="rh" type="number" step="any" value="${db.settings.rerunHours}"></label>
+    <label class="chk"><input id="rd" type="checkbox" checked> Fait</label>
+    <button class="btn plus" onclick="addRerun()">+ Ajouter ce re-run</button></div>`+
+    listCard('Re-runs du jour (bénéfice)',list);
+};
+function addRerun(){
+  const d=ensureDay(selDate); d.rerun=d.rerun||[];
+  d.rerun.push({mode:rm.value,boost:rb.value,hours:+rh.value||0,done:rd.checked});
+  save(); render();
+}
+function delRerun(i){db.days[selDate].rerun.splice(i,1);save();render();}
+
+VIEWS.baies=()=>{
+  const b=(db.days[selDate]||{}).baies||{};
+  const S=db.settings;
+  return dateBar()+`<div class="card"><h3>Baies</h3>
+    <label class="chk"><input id="bd" type="checkbox"${b.done?' checked':''}> Fait</label>
+    <label class="fld">Sets de graines achetés (1 set = ${money(S.seedPrice)})<input id="bs" type="number" min="0" value="${b.sets||0}"></label>
+    <label class="fld">Stacks récoltés (100 baies = ${money(S.stackPrice)})<input id="bk" type="number" min="0" value="${b.stacks||0}"></label>
+    <label class="chk"><input id="bv" type="checkbox"${(b.soldStacks||0)>0?' checked':''}> Vendu</label>
+    <label class="fld">Stacks vendus<input id="bsv" type="number" min="0" value="${b.soldStacks||0}"></label>
+    <button class="btn plus" onclick="saveBaies()">Enregistrer</button>
+    <p class="muted">Un stack non vendu n'entre dans le bénéfice qu'au moment de la vente.</p></div>`;
+};
+function saveBaies(){
+  const d=ensureDay(selDate);
+  d.baies={done:bd.checked,sets:+bs.value||0,stacks:+bk.value||0,soldStacks:bv.checked?(+bsv.value||0):0};
+  save(); render();
+}
+
+VIEWS.ditto=()=>{
+  const b=(db.days[selDate]||{}).ditto||{};
+  const S=db.settings;
+  return dateBar()+`<div class="card"><h3>Ditto</h3>
+    <label class="chk"><input id="dd" type="checkbox"${b.done?' checked':''}> Fait</label>
+    <label class="fld">Boxes (coût de départ ${money(S.boxCost)} par box)<input id="db1" type="number" min="0" value="${b.boxes||0}"></label>
+    <label class="fld">Pokéballs utilisées (prix ${money(S.pokeballPrice)} l'unité)<input id="dp" type="number" min="0" value="${b.pokeballQty||0}"></label>
+    <label class="fld">Boxes vendues<input id="dv" type="number" min="0" value="${b.soldBoxes||0}"></label>
+    <label class="fld">Prix de vente par box<input id="dpr" type="number" min="0" value="${b.soldPrice||0}"></label>
+    <button class="btn plus" onclick="saveDitto()">Enregistrer</button></div>`;
+};
+function saveDitto(){
+  const d=ensureDay(selDate);
+  d.ditto={done:dd.checked,boxes:+db1.value||0,pokeballQty:+dp.value||0,soldBoxes:+dv.value||0,soldPrice:+dpr.value||0};
+  save(); render();
+}
+
+VIEWS.achat=()=>{
+  const d=db.days[selDate]||{};
+  const list=(d.achat||[]).map((a,i)=>({text:`${a.type==='vente'?'Vente':'Achat'} · ${a.item}`,amt:money(a.price),del:`delAchat(${i})`}));
+  return dateBar()+`<div class="card"><h3>Achat-revente</h3>
+    <label class="fld">Type<select id="at"><option value="achat">Achat</option><option value="vente">Revente</option></select></label>
+    <label class="fld">Article<input id="ai" type="text"></label>
+    <label class="fld">Prix<input id="ap" type="number" min="0"></label>
+    <button class="btn plus" onclick="addAchat()">+ Ajouter</button></div>`+listCard('Opérations du jour',list);
+};
+function addAchat(){const d=ensureDay(selDate);d.achat=d.achat||[];d.achat.push({type:at.value,item:ai.value||'Sans nom',price:+ap.value||0});save();render();}
+function delAchat(i){db.days[selDate].achat.splice(i,1);save();render();}
+
+VIEWS.dep=()=>{
+  const d=db.days[selDate]||{};
+  const list=(d.dep||[]).map((a,i)=>({text:a.name,amt:money(a.amount),del:`delDep(${i})`}));
+  return dateBar()+`<div class="card"><h3>Dépense</h3>
+    <label class="fld">Nom (charme, graine, pièce rune…)<input id="dn" type="text"></label>
+    <label class="fld">Montant<input id="dm" type="number" min="0"></label>
+    <button class="btn plus" onclick="addDep()">+ Ajouter</button></div>`+listCard('Dépenses du jour',list);
+};
+function addDep(){const d=ensureDay(selDate);d.dep=d.dep||[];d.dep.push({name:dn.value||'Sans nom',amount:+dm.value||0});save();render();}
+function delDep(i){db.days[selDate].dep.splice(i,1);save();render();}
+
+VIEWS.autres=()=>{
+  const d=db.days[selDate]||{};
+  const list=(d.autres||[]).map((a,i)=>({text:`${a.kind==='gain'?'Gain':'Dépense'} · ${a.name}`,amt:money(a.amount),del:`delAutre(${i})`}));
+  return dateBar()+`<div class="card"><h3>Autres gains ou dépenses</h3>
+    <label class="fld">Type<select id="ak"><option value="gain">Gain</option><option value="depense">Dépense</option></select></label>
+    <label class="fld">Nom<input id="an" type="text"></label>
+    <label class="fld">Montant<input id="am" type="number" min="0"></label>
+    <button class="btn plus" onclick="addAutre()">+ Ajouter</button></div>`+listCard('Autres du jour',list);
+};
+function addAutre(){const d=ensureDay(selDate);d.autres=d.autres||[];d.autres.push({kind:ak.value,name:an.value||'Sans nom',amount:+am.value||0});save();render();}
+function delAutre(i){db.days[selDate].autres.splice(i,1);save();render();}
+
+VIEWS.prev=()=>{
+  const total=db.planned.reduce((a,p)=>a+(+p.amount||0),0);
+  const list=db.planned.map((p,i)=>({text:p.name,amt:money(p.amount),del:`delPlanned(${i})`}));
+  return `<div class="card"><h3>Nouvelle dépense prévue</h3>
+    <label class="fld">Objet / cause<input id="pn" type="text"></label>
+    <label class="fld">Montant<input id="pm" type="number" min="0"></label>
+    <button class="btn plus" onclick="addPlanned()">+ Ajouter</button>
+    <p class="muted">Ces montants ne modifient pas les totaux réels, seulement le solde estimé.</p></div>`+
+    listCard(`Dépenses prévues (total ${money(total)})`,list);
+};
+function addPlanned(){db.planned.push({name:pn.value||'Sans nom',amount:+pm.value||0});save();render();}
+function delPlanned(i){db.planned.splice(i,1);save();render();}
+
+VIEWS.res=()=>{
+  const ws=weekStart(today());
+  const wr=weekRange(today());
+  const mr=monthRange(today());
+  const avg=mr.n? mr.b/mr.n : 0;
+  return `<div class="card"><h3>Cette semaine (${ws} → ${addDays(ws,6)})</h3>${kpis3(wr)}</div>
+    <div class="card"><h3>Ce mois-ci</h3>${kpis3(mr)}<p class="muted">Bénéfice moyen par jour saisi : ${money(avg)}</p></div>`;
+};
+
+VIEWS.bil=()=>{
+  const ps=prevWeekStart(today());
+  const pw=rangeSum(ps,addDays(ps,6));
+  const pm=monthRange(prevMonthDate(today()));
+  return `<div class="card"><h3>Semaine précédente</h3>${kpis3(pw)}</div>
+    <div class="card"><h3>Mois précédent</h3>${kpis3(pm)}</div>`;
+};
+
+VIEWS.set=()=>{
+  const S=db.settings;
+  const f=(id,label,val)=>`<label class="fld">${label}<input id="${id}" type="number" step="any" value="${val}"></label>`;
+  let rates='';
+  for(const m in MODES) for(const b in BOOSTS) rates+=f(`r_${m}_${b}`,`Gain/h · ${MODES[m]} · ${BOOSTS[b]}`,S.rates[m][b]);
+  let costs='';
+  for(const b in BOOSTS) costs+=f(`c_${b}`,`Dépense/h · ${BOOSTS[b]}`,S.boostCost[b]);
+  const evs=db.events.map((e,i)=>({text:`${e.name} · ${e.start} → ${e.end} · x${e.mult}`,del:`delEvent(${i})`}));
+  return `<div class="card"><h3>Valeurs du mois</h3>
+    <p class="muted">Dernière mise à jour : ${S.monthKey||'jamais'}</p>
+    ${f('f_start','Solde de départ',S.startBalance)}
+    ${f('f_seed','Prix du set de graines',S.seedPrice)}
+    ${f('f_stack','Prix du stack de baies (100)',S.stackPrice)}
+    ${f('f_box','Coût de départ d\'une box Ditto',S.boxCost)}
+    ${f('f_pb','Prix d\'une Pokéball',S.pokeballPrice)}
+    ${f('f_hours','Durée d\'un re-run (h)',S.rerunHours)}
+    <h4>Gains par heure (re-runs)</h4>${rates}
+    <h4>Dépenses par heure (re-runs)</h4>${costs}
+    <button class="btn plus" onclick="saveMonthly()">Enregistrer les valeurs du mois</button></div>
+    <div class="card"><h3>Événements</h3>
+      <label class="fld">Nom<input id="en" type="text"></label>
+      <label class="fld">Début<input id="es" type="date"></label>
+      <label class="fld">Fin<input id="ee" type="date"></label>
+      <label class="fld">Multiplicateur des re-runs (ex. 1.5)<input id="em" type="number" step="any" value="1"></label>
+      <button class="btn plus" onclick="addEvent()">+ Ajouter l'événement</button></div>
+    ${evs.length?listCard('Événements enregistrés',evs):''}
+    <div class="card"><h3>Fond d'écran</h3>
+      <label class="fld">Photo de ton téléphone<input type="file" accept="image/*" onchange="setBg(this.files[0])"></label>
+      <button class="btn" onclick="resetBg()">Revenir à l'acier mercure</button></div>
+    <div class="card"><h3>Données</h3>
+      <button class="btn" onclick="resetAll()">Effacer toutes les données</button></div>`;
+};
+function saveMonthly(){
+  const S=db.settings;
+  const n=id=>+document.getElementById(id).value||0;
+  S.startBalance=n('f_start');S.seedPrice=n('f_seed');S.stackPrice=n('f_stack');
+  S.boxCost=n('f_box');S.pokeballPrice=n('f_pb');S.rerunHours=n('f_hours');
+  for(const m in MODES) for(const b in BOOSTS) S.rates[m][b]=n(`r_${m}_${b}`);
+  for(const b in BOOSTS) S.boostCost[b]=n(`c_${b}`);
+  S.monthKey=monthKey(today());
+  save(); alert('Valeurs du mois enregistrées.'); render();
+}
+function addEvent(){
+  if(!es.value||!ee.value){alert('Indique la date de début et de fin.');return;}
+  db.events.push({name:en.value||'Événement',start:es.value,end:ee.value,mult:+em.value||1});
+  save(); render();
+}
+function delEvent(i){db.events.splice(i,1);save();render();}
+function setBg(file){
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=()=>{ db.bg=r.result; try{localStorage.setItem(K,JSON.stringify(db));}catch(e){alert("Image trop lourde pour être sauvegardée.");} applyBg(); };
+  r.readAsDataURL(file);
+}
+function resetBg(){db.bg='';save();applyBg();}
+function resetAll(){
+  if(confirm("Effacer toutes les données de l'application ?")){
+    localStorage.removeItem(K); db=defDb(); render();
+  }
+}
+
+/* ---------- Démarrage ---------- */
+render();
+if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
